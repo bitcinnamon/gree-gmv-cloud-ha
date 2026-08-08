@@ -1,0 +1,13 @@
+{
+  "domain": "gree_gmv_cloud",
+  "name": "Gree GMV Cloud",
+  "codeowners": ["@bitcinnamon"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/bitcinnamon/gree-gmv-cloud-ha",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/bitcinnamon/gree-gmv-cloud-ha/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

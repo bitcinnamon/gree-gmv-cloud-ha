@@ -1,0 +1,32 @@
+{
+  "title": "Gree GMV Cloud",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Gree GMV Cloud",
+        "description": "Unofficial private-cloud integration for equipment bound to your own Central Air Conditioner Assistant mini-program account. Credentials are stored by Home Assistant. No SMS or WeChat login automation is performed.",
+        "data": {
+          "token": "Bearer token",
+          "open_id": "WeChat OpenID",
+          "uid": "Gree user ID"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Update Gree GMV credential",
+        "description": "Enter a new Bearer token captured from your own account.",
+        "data": {
+          "token": "Bearer token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to Gree cloud",
+      "invalid_auth": "The credential was rejected",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This Gree GMV cloud account is already configured",
+      "reauth_successful": "Credential updated successfully"
+    }
+  }
+}

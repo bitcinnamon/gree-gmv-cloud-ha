@@ -1,0 +1,32 @@
+{
+  "title": "格力 GMV 云",
+  "config": {
+    "step": {
+      "user": {
+        "title": "接入格力 GMV 云",
+        "description": "这是面向本人“格力中央空调微助手”账号的非官方私有云集成。凭据由 Home Assistant 保存；本集成不会自动操作短信或微信登录。",
+        "data": {
+          "token": "Bearer token",
+          "open_id": "微信 OpenID",
+          "uid": "格力用户 ID"
+        }
+      },
+      "reauth_confirm": {
+        "title": "更新格力 GMV 凭据",
+        "description": "输入从本人账号取得的新 Bearer token。",
+        "data": {
+          "token": "Bearer token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "无法连接格力云",
+      "invalid_auth": "凭据被服务器拒绝",
+      "unknown": "发生未预期错误"
+    },
+    "abort": {
+      "already_configured": "这个格力 GMV 云账号已经配置",
+      "reauth_successful": "凭据更新成功"
+    }
+  }
+}

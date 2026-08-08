@@ -1,0 +1,87 @@
+# Gree GMV Cloud for Home Assistant
+
+An unofficial Home Assistant custom integration for a Gree GMV central air-conditioning project exposed through the WeChat mini-program **Gree Central Air Conditioner Assistant** (格力中央空调微助手).
+
+This integration was developed for one owner-operated installation with a `GMV-H200WL/H2S` outdoor unit, `XC71-33/H2` wired controllers, and an existing cellular DTU. It does **not** use the LAN protocol implemented by the standard Home Assistant Gree integration.
+
+## Status and safety boundary
+
+- Cloud polling through Gree's private, undocumented API.
+- One climate entity per indoor unit returned by the owner's project.
+- No SMS automation, WeChat protocol emulation, account binding, or access to equipment owned by anyone else.
+- No local-control claim: operation depends on Gree's cloud service and the installed cellular DTU.
+- Tested with Home Assistant Container 2026.7.1 and one five-zone installation.
+- Pre-release software. Use only while someone is present until each room has been calibrated.
+
+The integration and its authors are not affiliated with or endorsed by Gree Electric Appliances Inc.
+
+## Features
+
+- Per-room power control.
+- Cooling, heating, dry, fan-only, and auto modes.
+- Whole-degree target temperatures from 16–30 °C.
+- Automatic plus five explicit fan targets.
+- Current room/controller temperature when supplied by the cloud.
+- Online, configured mode, reported fan level, and error-presence attributes.
+- Automatic Bearer-token refresh six hours before JWT expiry.
+- Home Assistant reauthentication when the cloud rejects a credential.
+
+The API reports configured mode and power but no verified compressor-demand bit. The integration therefore does not invent an active cooling/heating `hvac_action`.
+
+## Installation with HACS
+
+1. In HACS, open the top-right menu and choose **Custom repositories**.
+2. Add `https://github.com/bitcinnamon/gree-gmv-cloud-ha` as type **Integration**.
+3. Download **Gree GMV Cloud**.
+4. Restart Home Assistant.
+5. Go to **Settings → Devices & services → Add integration → Gree GMV Cloud**.
+
+HACS only supports public GitHub repositories. This repository deliberately contains no account credentials, captures, device identifiers, room names, or original mini-program files.
+
+## Credentials
+
+Initial setup requires three values from the owner's already-authenticated mini-program session:
+
+- `Authorization` Bearer token, including or excluding the `Bearer ` prefix;
+- WeChat `openId`;
+- Gree `uid`.
+
+An ordinary authenticated request to
+
+```text
+POST https://a.gree.com:7016/gree2/app/v2.0/control/getUnits
+```
+
+contains the Bearer token in its `Authorization` request header and `openId`/`uid` in its form body. Obtain these only from your own session. Do not upload a HAR file, paste credentials into an issue, or commit Home Assistant's `.storage` directory.
+
+The observed JWT lifetime is 72 hours. While Home Assistant is running, the integration refreshes it before expiry and immediately persists the replacement. If that refresh chain breaks, Home Assistant asks only for a new token; the existing `openId` and `uid` remain configured.
+
+Home Assistant stores Config Entry data in its configuration directory. Protect that directory and its backups; it is not a dedicated encrypted secrets vault.
+
+## First-control procedure
+
+The mini-program's current protocol writes a complete target state. Its status and command fan-speed values are offset, and an automatic target cannot be inferred from the reported execution level. For that reason, the first release has a safety guard:
+
+1. Let the integration complete at least one successful state refresh.
+2. Pick one occupied test room that is already on in cooling, heating, or fan-only mode.
+3. Explicitly choose the intended fan mode once in Home Assistant.
+4. Confirm the wired controller and airflow after the 15-second readback.
+5. Repeat this calibration once for each room before using power, mode, or temperature automations.
+
+Dry and auto modes follow the current mini-program UI restrictions and do not allow fan adjustment. Temperature changes are blocked while the room is off or in auto mode.
+
+## Known limitations
+
+- Private cloud endpoints may change or be withdrawn without notice.
+- Initial credential acquisition is manual; the integration cannot mint a WeChat `jsCode`.
+- Refreshing an already expired token has not been verified. A long Home Assistant outage may therefore require importing a new token.
+- New indoor units added after initial setup are not dynamically registered in version 0.1.0.
+- Fan write/read semantics were confirmed only for the tested installation and remain guarded by explicit per-room calibration.
+
+## Removal
+
+Remove the integration from **Settings → Devices & services**, uninstall it in HACS, and restart Home Assistant. To revoke the cloud session immediately, log out of the official mini-program or use any account-session controls Gree makes available.
+
+## License
+
+MIT

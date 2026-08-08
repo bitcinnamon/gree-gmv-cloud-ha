@@ -1,0 +1,22 @@
+# Credentials and captures. Never publish these.
+/private/
+*.har
+
+# Local reverse-engineering notes and probes are intentionally not part of the
+# public HACS repository.
+/auth-flow.md
+/cloud-capture-plan.md
+/home-assistant-mvp.md
+/miniapp-protocol.md
+/report.md
+/fixtures/
+/sanitize_har.py
+/test_sanitize_har.py
+/*.mjs
+/*.zip
+
+# Python/editor artifacts.
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store

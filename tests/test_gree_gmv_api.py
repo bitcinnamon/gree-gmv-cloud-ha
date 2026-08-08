@@ -423,6 +423,72 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured[0]["windSpeed"], 2)
         self.assertEqual(captured[0]["setTemp"], 26)
 
+    async def test_off_to_on_transition_always_uses_automatic_fan(self):
+        powered_off = {
+            **SYNTHETIC_UNIT,
+            "on_OFF_Status": "0",
+            "windSpeed": "1",
+        }
+        session = FakeSession(
+            [
+                {"success": True, "code": 0, "data": {"units": [powered_off]}},
+                {"success": True, "code": 0},
+            ]
+        )
+        client = GreeCloudApi(
+            session,
+            token="synthetic-token",
+            open_id="synthetic-open-id",
+            uid="synthetic-uid",
+        )
+        unit_key = GreeUnit.from_api(powered_off).unique_id
+        captured = []
+        with patch(
+            "custom_components.gree_gmv_cloud.api.encrypt_control_payload",
+            side_effect=lambda payload: (
+                captured.append(payload) or {"requestData": "x", "encrypted": "y"}
+            ),
+        ):
+            applied_code = await client.async_control_unit(
+                unit_key,
+                wind_target_code=6,
+                changes={"on_OFF_Status": 1},
+                reconcile_reported_fan=True,
+            )
+        self.assertEqual(applied_code, 1)
+        self.assertEqual(captured[0]["on_OFF_Status"], 1)
+        self.assertEqual(captured[0]["windSpeed"], 1)
+
+    async def test_idempotent_power_on_does_not_reset_running_fan(self):
+        session = FakeSession(
+            [
+                {"success": True, "code": 0, "data": {"units": [SYNTHETIC_UNIT]}},
+                {"success": True, "code": 0},
+            ]
+        )
+        client = GreeCloudApi(
+            session,
+            token="synthetic-token",
+            open_id="synthetic-open-id",
+            uid="synthetic-uid",
+        )
+        unit_key = GreeUnit.from_api(SYNTHETIC_UNIT).unique_id
+        captured = []
+        with patch(
+            "custom_components.gree_gmv_cloud.api.encrypt_control_payload",
+            side_effect=lambda payload: (
+                captured.append(payload) or {"requestData": "x", "encrypted": "y"}
+            ),
+        ):
+            applied_code = await client.async_control_unit(
+                unit_key,
+                wind_target_code=6,
+                changes={"on_OFF_Status": 1},
+                reconcile_reported_fan=True,
+            )
+        self.assertEqual(applied_code, 6)
+        self.assertEqual(captured[0]["windSpeed"], 6)
+
     async def test_transport_exception_is_sanitized(self):
         secret = "sensitive-old-token"
         session = FakeSession([RuntimeError(f"request contained {secret}")])

@@ -10,7 +10,12 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
-from .const import DEFAULT_BASE_URL, FAN_MODE_TO_CONTROL, TOKEN_REFRESH_MARGIN
+from .const import (
+    DEFAULT_BASE_URL,
+    FAN_AUTO,
+    FAN_MODE_TO_CONTROL,
+    TOKEN_REFRESH_MARGIN,
+)
 from .crypto import encrypt_control_payload
 from .fan_policy import FAN_CONTROL_TO_MODE, reconcile_fixed_fan_target
 from .models import GreeUnit
@@ -273,7 +278,13 @@ class GreeCloudApi:
                     "The indoor unit has no current set temperature"
                 )
             resolved_wind_target_code = wind_target_code
-            if reconcile_reported_fan:
+            turns_unit_on = not unit.power and changes.get("on_OFF_Status") == 1
+            if turns_unit_on:
+                # A fresh cloud read is authoritative here: every real off-to-on
+                # transition starts in automatic fan, even if HA had cached a
+                # fixed target or its prior poll still showed the room as on.
+                resolved_wind_target_code = FAN_MODE_TO_CONTROL[FAN_AUTO]
+            elif reconcile_reported_fan:
                 configured_target = FAN_CONTROL_TO_MODE[wind_target_code]
                 reconciled_target = reconcile_fixed_fan_target(
                     configured_target,

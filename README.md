@@ -21,6 +21,7 @@ The integration and its authors are not affiliated with or endorsed by Gree Elec
 - Cooling, heating, dry, fan-only, and master-only auto mode.
 - Half-degree target temperatures from 16–30 °C.
 - Automatic fan target by default, plus five explicit per-room targets.
+- Every real room power-on transition starts with automatic fan.
 - Current room/controller temperature when supplied by the cloud.
 - Online, configured mode, reported fan level, and error-presence attributes.
 - Automatic Bearer-token refresh six hours before JWT expiry.
@@ -72,6 +73,8 @@ The mini-program's current protocol writes a complete target state. Its status a
 
 An explicit per-room fan selection overrides that default and is persisted in the Home Assistant config entry across restarts and upgrades. When a room is off, in auto, or in dry mode, changing the target only updates Home Assistant and does not send a cloud control request. When a room is already running in cooling, heating, or fan-only mode, selecting a fan target submits a normal full-state write and should be verified at the wired controller.
 
+Before every write, the integration reads fresh cloud state. If that state shows the room is off and the requested operation turns it on, the complete control payload always uses automatic fan (`windSpeed=1`) and the saved Home Assistant target is updated to automatic. An idempotent power-on request for an already-running room does not reset its fan target.
+
 While a fixed target is cached, a different fixed execution level reported by an active cooling, heating, or fan-only unit is treated as a wired-controller change. The integration adopts that level during polling and rechecks it immediately before any full-state write, so changing temperature does not restore a stale fixed fan target. An automatic target is never inferred from execution level and is always preserved as automatic.
 
 For HomeKit's linked climate fan, the integration exposes automatic as a separate Auto/Manual choice plus the [four standard fixed names that Home Assistant recognizes](https://github.com/home-assistant/core/blob/7c5eb60b7a98a3900cece9d8719f7a5620f459e7/homeassistant/components/homekit/climate_util.py#L27-L55). The fixed slider renders `25/50/75/100%` as levels `1/2/3/5`. HomeKit reserves 0% for an inactive fan, and Home Assistant [discards a bare zero-speed write](https://github.com/home-assistant/core/blob/7c5eb60b7a98a3900cece9d8719f7a5620f459e7/homeassistant/components/homekit/climate_base.py#L219-L229), so 0% is not a fifth writable speed. Selecting Auto, or using the linked fan's off action when HomeKit supplies it, sends automatic (`windSpeed=1`); the main climate power switch remains the only way to turn the room off. If the room is already off, selecting Auto only saves it as the next target and never turns the room on. Automatic has no server target field, so HomeKit may retain the last fixed slider position while its Auto choice is selected. Fixed-level display comes from the latest server report rather than the requested target: it is first checked three seconds after a write and, if needed, once more at five seconds total before rolling back. Physical level 4 remains visible in `reported_fan_level` but is rendered at the nearer 75% HomeKit step.
@@ -83,7 +86,7 @@ Dry and auto modes follow the current mini-program UI restrictions and do not al
 - Private cloud endpoints may change or be withdrawn without notice.
 - Initial credential acquisition is manual; the integration cannot mint a WeChat `jsCode`.
 - Refreshing an already expired token has not been verified. A long Home Assistant outage may therefore require importing a new token.
-- New indoor units added after initial setup are not dynamically registered in version 0.1.4.
+- New indoor units added after initial setup are not dynamically registered in version 0.1.5.
 - The master-auto direction lamp is not present in the captured cloud response. Direction inference and opposite-direction rejection behavior should be rechecked on other GMV generations.
 - Fan command values `1..6` and reported execution values `3..7` have different meanings. The five fixed execution levels were calibrated on the tested installation; an unconfigured target deliberately defaults to automatic rather than being inferred from execution speed.
 - The official mini-program can write automatic fan and the wired controller applies it, but after leaving the page the mini-program cannot display that target again. Home Assistant likewise has no server field from which to recover an automatic target and therefore persists only its own most recent explicit selection.

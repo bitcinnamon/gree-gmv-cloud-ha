@@ -83,7 +83,7 @@ Dry and auto modes follow the current mini-program UI restrictions and do not al
 - Private cloud endpoints may change or be withdrawn without notice.
 - Initial credential acquisition is manual; the integration cannot mint a WeChat `jsCode`.
 - Refreshing an already expired token has not been verified. A long Home Assistant outage may therefore require importing a new token.
-- New indoor units added after initial setup are not dynamically registered in version 0.1.1.
+- New indoor units added after initial setup are not dynamically registered in version 0.1.2.
 - The master-auto direction lamp is not present in the captured cloud response. Direction inference and opposite-direction rejection behavior should be rechecked on other GMV generations.
 - Fan command values `1..6` and reported execution values `3..7` have different meanings. The five fixed execution levels were calibrated on the tested installation; the target remains guarded by explicit per-room calibration.
 

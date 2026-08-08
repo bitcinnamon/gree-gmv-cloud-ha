@@ -1,0 +1,27 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Build HACS release archive
+        working-directory: custom_components/gree_gmv_cloud
+        run: >-
+          zip -r ../../../gree_gmv_cloud.zip .
+          -x '__pycache__/' '__pycache__/*' '*/__pycache__/*' '*.pyc'
+      - name: Upload HACS release archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "${{ github.event.release.tag_name }}"
+          gree_gmv_cloud.zip --clobber

@@ -20,7 +20,7 @@ The integration and its authors are not affiliated with or endorsed by Gree Elec
 - Per-room power control.
 - Cooling, heating, dry, fan-only, and master-only auto mode.
 - Half-degree target temperatures from 16–30 °C.
-- Automatic plus five explicit fan targets.
+- Automatic fan target by default, plus five explicit per-room targets.
 - Current room/controller temperature when supplied by the cloud.
 - Online, configured mode, reported fan level, and error-presence attributes.
 - Automatic Bearer-token refresh six hours before JWT expiry.
@@ -66,18 +66,11 @@ The observed JWT lifetime is 72 hours. While Home Assistant is running, the inte
 
 Home Assistant stores Config Entry data in its configuration directory. Protect that directory and its backups; it is not a dedicated encrypted secrets vault.
 
-## First-control procedure
+## Fan-target policy
 
-The mini-program's current protocol writes a complete target state. Its status and command fan-speed values are offset, and an automatic target cannot be inferred from the reported execution level. For that reason, the first release has a safety guard:
+The mini-program's current protocol writes a complete target state. Its status and command fan-speed values are offset, so an automatic target cannot be inferred from the reported execution level. Version 0.1.0 uses automatic fan as the safe installation default for every room that has no explicit Home Assistant selection.
 
-1. Let the integration complete at least one successful state refresh.
-2. Pick one occupied test room that is already on in cooling, heating, or fan-only mode.
-3. Explicitly choose the intended fan mode once in Home Assistant. If the room
-   is off, in auto, or in dry mode, version 0.1.3 and later save that target
-   locally without turning the indoor unit on or sending a cloud control request.
-4. For a room that is already running, confirm the wired controller and airflow
-   after the 15-second readback.
-5. Repeat this calibration once for each room before using power, mode, or temperature automations. The selected targets are persisted in the Home Assistant config entry and survive restarts and upgrades.
+An explicit per-room fan selection overrides that default and is persisted in the Home Assistant config entry across restarts and upgrades. When a room is off, in auto, or in dry mode, changing the target only updates Home Assistant and does not send a cloud control request. When a room is already running in cooling, heating, or fan-only mode, selecting a fan target submits a normal full-state write and should be verified at the wired controller.
 
 Dry and auto modes follow the current mini-program UI restrictions and do not allow fan adjustment. Temperature changes are blocked while the room is off or in auto mode. Mode changes may restore that mode's remembered setpoint, so the integration always polls the actual state after a write.
 
@@ -86,9 +79,9 @@ Dry and auto modes follow the current mini-program UI restrictions and do not al
 - Private cloud endpoints may change or be withdrawn without notice.
 - Initial credential acquisition is manual; the integration cannot mint a WeChat `jsCode`.
 - Refreshing an already expired token has not been verified. A long Home Assistant outage may therefore require importing a new token.
-- New indoor units added after initial setup are not dynamically registered in version 0.1.3.
+- New indoor units added after initial setup are not dynamically registered in version 0.1.0.
 - The master-auto direction lamp is not present in the captured cloud response. Direction inference and opposite-direction rejection behavior should be rechecked on other GMV generations.
-- Fan command values `1..6` and reported execution values `3..7` have different meanings. The five fixed execution levels were calibrated on the tested installation; the target remains guarded by explicit per-room calibration.
+- Fan command values `1..6` and reported execution values `3..7` have different meanings. The five fixed execution levels were calibrated on the tested installation; an unconfigured target deliberately defaults to automatic rather than being inferred from execution speed.
 
 ## Removal
 

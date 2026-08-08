@@ -17,6 +17,7 @@ from .const import (
     FAN_MODE_TO_CONTROL,
     WRITE_READBACK_DELAY,
 )
+from .fan_policy import effective_fan_target
 from .models import GreeUnit
 from .system_policy import DirectionState, allowed_mode_codes, system_direction
 
@@ -57,11 +58,11 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
         except GreeApiError as err:
             raise UpdateFailed(str(err)) from err
 
-    def fan_target(self, unit_key: str) -> str | None:
-        """Return the last explicit HA fan target; never infer from status code."""
+    def fan_target(self, unit_key: str) -> str:
+        """Return the explicit target or automatic default; never infer status."""
         targets = self.entry.options.get(CONF_FAN_TARGETS, {})
         target = targets.get(unit_key) if isinstance(targets, dict) else None
-        return target if target in FAN_MODE_TO_CONTROL else None
+        return effective_fan_target(target)
 
     def system_direction(self) -> DirectionState:
         """Return the system direction visible in the latest cloud snapshot."""

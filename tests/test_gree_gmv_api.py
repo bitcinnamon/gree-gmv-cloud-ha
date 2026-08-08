@@ -18,6 +18,7 @@ from custom_components.gree_gmv_cloud.crypto import (
     encrypt_control_payload,
     normalize_control_payload,
 )
+from custom_components.gree_gmv_cloud.fan_policy import effective_fan_target
 from custom_components.gree_gmv_cloud.models import GreeUnit
 from custom_components.gree_gmv_cloud.system_policy import (
     DIRECTION_COOLING,
@@ -130,6 +131,16 @@ class ModelTests(unittest.TestCase):
         self.assertTrue(unit.control_identity_is_valid())
         self.assertNotIn("room_name", unit.safe_diagnostics())
         self.assertNotIn("mac", unit.safe_diagnostics())
+
+
+class FanPolicyTests(unittest.TestCase):
+    def test_unconfigured_or_invalid_target_defaults_to_auto(self):
+        self.assertEqual(effective_fan_target(None), "auto")
+        self.assertEqual(effective_fan_target("invalid"), "auto")
+        self.assertEqual(effective_fan_target({"unexpected": "shape"}), "auto")
+
+    def test_explicit_target_overrides_default(self):
+        self.assertEqual(effective_fan_target("medium_high"), "medium_high")
 
 
 class SystemPolicyTests(unittest.TestCase):

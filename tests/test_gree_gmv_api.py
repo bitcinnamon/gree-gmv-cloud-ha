@@ -13,7 +13,11 @@ from custom_components.gree_gmv_cloud.api import (
     GreeControlError,
     decode_jwt_timing,
 )
-from custom_components.gree_gmv_cloud.const import HOMEKIT_FAN_MODES
+from custom_components.gree_gmv_cloud.const import (
+    FAN_FINAL_READBACK_ADDITIONAL_DELAY,
+    HOMEKIT_FAN_MODES,
+    WRITE_READBACK_DELAY,
+)
 from custom_components.gree_gmv_cloud.crypto import (
     CONTROL_FIELDS,
     encrypt_control_payload,
@@ -179,8 +183,12 @@ class FanPolicyTests(unittest.TestCase):
                 )
 
     def test_homekit_four_step_modes_map_to_fixed_levels_1_2_3_5(self):
-        self.assertEqual(HOMEKIT_FAN_MODES, ["off", "low", "middle", "medium", "high"])
+        self.assertEqual(
+            HOMEKIT_FAN_MODES,
+            ["off", "auto", "low", "middle", "medium", "high"],
+        )
         self.assertEqual(control_target_for_homekit_fan_mode("off"), "auto")
+        self.assertEqual(control_target_for_homekit_fan_mode("auto"), "auto")
         self.assertEqual(control_target_for_homekit_fan_mode("low"), "low")
         self.assertEqual(control_target_for_homekit_fan_mode("middle"), "medium_low")
         self.assertEqual(control_target_for_homekit_fan_mode("medium"), "medium")
@@ -197,10 +205,10 @@ class FanPolicyTests(unittest.TestCase):
                     homekit_mode,
                 )
 
-    def test_homekit_state_renders_auto_and_power_off_at_zero_percent(self):
+    def test_homekit_state_exposes_auto_separately_and_reports_power_off(self):
         self.assertEqual(
             homekit_fan_mode_from_state("auto", reported_wind_speed=7, power=True),
-            "off",
+            "auto",
         )
         self.assertEqual(
             homekit_fan_mode_from_state("high", reported_wind_speed=7, power=False),
@@ -213,6 +221,10 @@ class FanPolicyTests(unittest.TestCase):
         self.assertTrue(should_send_fan_control(power=True, mode=1))
         self.assertFalse(should_send_fan_control(power=True, mode=2))
         self.assertFalse(should_send_fan_control(power=True, mode=5))
+
+    def test_command_readback_occurs_at_three_and_five_seconds(self):
+        self.assertEqual(WRITE_READBACK_DELAY, 3)
+        self.assertEqual(FAN_FINAL_READBACK_ADDITIONAL_DELAY, 2)
 
 
 class SystemPolicyTests(unittest.TestCase):

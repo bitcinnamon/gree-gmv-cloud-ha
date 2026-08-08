@@ -13,7 +13,8 @@ CONF_FAN_TARGETS = "fan_targets"
 DEFAULT_BASE_URL = "https://a.gree.com:7016"
 DEFAULT_SCAN_INTERVAL = timedelta(seconds=30)
 TOKEN_REFRESH_MARGIN = timedelta(hours=6)
-WRITE_READBACK_DELAY = 15
+WRITE_READBACK_DELAY = 3
+FAN_FINAL_READBACK_ADDITIONAL_DELAY = 2
 FAN_TARGET_RECONCILE_GRACE = 45
 
 MIN_TEMPERATURE = 16
@@ -45,11 +46,11 @@ FAN_MODE_TO_CONTROL = {
 }
 FAN_MODES = list(FAN_MODE_TO_CONTROL)
 
-# Home Assistant's HomeKit climate adapter recognizes exactly these four
-# standard fixed-speed names. Expose "off" as the 0% step but translate it to
-# Gree automatic fan; room power remains controlled by the climate switch.
-# Fixed level 4 is omitted so the linked fan can expose four stable steps.
-HOMEKIT_FAN_MODES = [FAN_OFF, FAN_LOW, FAN_MIDDLE, FAN_MEDIUM, FAN_HIGH]
+# Home Assistant's HomeKit climate adapter exposes automatic as a separate
+# target-fan-state characteristic and recognizes exactly these four ordered
+# fixed-speed names. Fixed level 4 is omitted from the slider so it can expose
+# four stable steps; the exact reported level remains available as an attribute.
+HOMEKIT_FAN_MODES = [FAN_OFF, FAN_AUTO, FAN_LOW, FAN_MIDDLE, FAN_MEDIUM, FAN_HIGH]
 
 REPORTED_FAN_LEVELS = {
     3: 1,

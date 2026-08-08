@@ -30,6 +30,7 @@ HOMEKIT_FAN_MODE_TO_TARGET = {
     # event as an automatic-fan command; the climate power switch remains the
     # only way to turn the room off.
     FAN_OFF: FAN_AUTO,
+    FAN_AUTO: FAN_AUTO,
     FAN_LOW: FAN_LOW,
     FAN_MIDDLE: FAN_MEDIUM_LOW,
     FAN_MEDIUM: FAN_MEDIUM,
@@ -37,9 +38,7 @@ HOMEKIT_FAN_MODE_TO_TARGET = {
 }
 
 TARGET_TO_HOMEKIT_FAN_MODE = {
-    # Reporting HomeKit "auto" would leave its rotation slider at the previous
-    # fixed value. Report the deliberately repurposed 0%/off step instead.
-    FAN_AUTO: FAN_OFF,
+    FAN_AUTO: FAN_AUTO,
     FAN_LOW: FAN_LOW,
     FAN_MEDIUM_LOW: FAN_MIDDLE,
     FAN_MEDIUM: FAN_MEDIUM,
@@ -84,7 +83,7 @@ def homekit_fan_mode_from_state(
         return FAN_OFF
     target = effective_fan_target(configured_target)
     if target == FAN_AUTO:
-        return FAN_OFF
+        return FAN_AUTO
     reported_level = REPORTED_FAN_LEVELS.get(reported_wind_speed)
     if reported_level is not None:
         return REPORTED_LEVEL_TO_HOMEKIT_FAN_MODE[reported_level]

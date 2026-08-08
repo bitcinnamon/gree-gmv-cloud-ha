@@ -16,6 +16,7 @@ from .const import (
     CONF_FAN_TARGETS,
     DEFAULT_SCAN_INTERVAL,
     FAN_AUTO,
+    FAN_FINAL_READBACK_ADDITIONAL_DELAY,
     FAN_MODE_TO_CONTROL,
     FAN_TARGET_RECONCILE_GRACE,
     WRITE_READBACK_DELAY,
@@ -162,7 +163,9 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
             )
         elif applied_fan_code != requested_fan_code:
             self.save_fan_target(unit_key, FAN_CONTROL_TO_MODE[applied_fan_code])
-        if await self._async_fan_command_was_superseded(superseded_event):
+        if await self._async_readback_wait_was_superseded(
+            superseded_event, WRITE_READBACK_DELAY
+        ):
             return
         await self.async_request_refresh()
         if (
@@ -185,7 +188,9 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
         # A cloud success response does not prove that the DTU has applied the
         # command. Poll once more without resending, then roll HA back to the
         # physical level if the requested fixed target is still unconfirmed.
-        if await self._async_fan_command_was_superseded(superseded_event):
+        if await self._async_readback_wait_was_superseded(
+            superseded_event, FAN_FINAL_READBACK_ADDITIONAL_DELAY
+        ):
             return
         await self.async_request_refresh()
         if (
@@ -240,17 +245,16 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
                     self._fan_control_events.pop(unit_key, None)
 
     @staticmethod
-    async def _async_fan_command_was_superseded(
+    async def _async_readback_wait_was_superseded(
         superseded_event: asyncio.Event | None,
+        delay: float,
     ) -> bool:
         """Wait for readback time or return early when a newer fan write arrives."""
         if superseded_event is None:
-            await asyncio.sleep(WRITE_READBACK_DELAY)
+            await asyncio.sleep(delay)
             return False
         try:
-            await asyncio.wait_for(
-                superseded_event.wait(), timeout=WRITE_READBACK_DELAY
-            )
+            await asyncio.wait_for(superseded_event.wait(), timeout=delay)
         except TimeoutError:
             return False
         return True

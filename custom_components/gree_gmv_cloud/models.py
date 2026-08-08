@@ -33,6 +33,7 @@ class GreeUnit:
     ip: int
     system_id: str
     bind_type: str
+    is_master: bool
     set_temperature: float | None
     environment_temperature: float | None
     power: bool
@@ -56,6 +57,7 @@ class GreeUnit:
             ip=ip,
             system_id=system_id,
             bind_type=str(value.get("bindType") or ""),
+            is_master=_as_int(value.get("mainIDU")) == 1,
             set_temperature=_as_float(value.get("setTemp")),
             environment_temperature=_as_float(value.get("enviroTemp")),
             power=_as_int(value.get("on_OFF_Status")) == 1,
@@ -71,13 +73,14 @@ class GreeUnit:
             self.mac
             and self.ip >= 0
             and self.system_id
-            and self.bind_type == "DTU"
+            and self.bind_type.lower() == "dtu"
         )
 
     def safe_diagnostics(self) -> dict[str, Any]:
         """Return state without room names or cloud/device identifiers."""
         return {
             "unit_key": self.unique_id,
+            "is_master": self.is_master,
             "set_temperature": self.set_temperature,
             "environment_temperature": self.environment_temperature,
             "power": self.power,

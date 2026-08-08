@@ -7,11 +7,13 @@ import base64
 import inspect
 import json
 import time
-from typing import Any, Awaitable, Callable, Protocol
+from collections.abc import Awaitable, Callable
+from typing import Any, Protocol
 
 from .const import DEFAULT_BASE_URL, TOKEN_REFRESH_MARGIN
 from .crypto import encrypt_control_payload
 from .models import GreeUnit
+from .system_policy import validate_control_change
 
 
 class GreeApiError(Exception):
@@ -64,7 +66,9 @@ def decode_jwt_timing(token: str) -> tuple[int, int] | None:
     if len(parts) != 3:
         return None
     try:
-        payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+        payload = json.loads(
+            base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))
+        )
     except (ValueError, TypeError, json.JSONDecodeError):
         return None
     issued_at = payload.get("iat")
@@ -124,9 +128,13 @@ class GreeCloudApi:
                     headers=headers,
                 ) as response:
                     if response.status in (401, 403):
-                        raise GreeAuthError("Gree cloud rejected the current credential")
+                        raise GreeAuthError(
+                            "Gree cloud rejected the current credential"
+                        )
                     if response.status < 200 or response.status >= 300:
-                        error_type = GreeControlError if is_write else GreeConnectionError
+                        error_type = (
+                            GreeControlError if is_write else GreeConnectionError
+                        )
                         if is_write:
                             raise error_type(
                                 f"Gree cloud returned HTTP {response.status}",
@@ -143,7 +151,7 @@ class GreeCloudApi:
                     ambiguous_write=True,
                 ) from None
             raise GreeConnectionError("Gree cloud request timed out") from None
-        except Exception:
+        except Exception:  # noqa: BLE001 - sanitize all transport-library errors
             if is_write:
                 raise GreeControlError(
                     "Gree cloud control transport failed; device state is unknown",
@@ -157,11 +165,17 @@ class GreeCloudApi:
     async def async_ensure_fresh_token(self) -> None:
         """Refresh once when the JWT is within six hours of expiry."""
         timing = decode_jwt_timing(self._token)
-        if timing is None or timing[1] - time.time() > TOKEN_REFRESH_MARGIN.total_seconds():
+        if (
+            timing is None
+            or timing[1] - time.time() > TOKEN_REFRESH_MARGIN.total_seconds()
+        ):
             return
         async with self._refresh_lock:
             timing = decode_jwt_timing(self._token)
-            if timing is None or timing[1] - time.time() > TOKEN_REFRESH_MARGIN.total_seconds():
+            if (
+                timing is None
+                or timing[1] - time.time() > TOKEN_REFRESH_MARGIN.total_seconds()
+            ):
                 return
             await self.async_refresh_token()
 
@@ -175,7 +189,11 @@ class GreeCloudApi:
             content_type="application/json",
         )
         data = response.get("data")
-        if not isinstance(data, dict) or not data.get("access_token") or not data.get("token_type"):
+        if (
+            not isinstance(data, dict)
+            or not data.get("access_token")
+            or not data.get("token_type")
+        ):
             raise GreeAuthError("Gree cloud returned an invalid refresh response")
         new_token = normalize_bearer(f"{data['token_type']} {data['access_token']}")
         self._token = new_token
@@ -210,8 +228,12 @@ class GreeCloudApi:
             else None
         )
         if response.get("code") != 0 or not isinstance(units, list):
-            raise GreeProtocolError("Gree cloud returned an invalid unit-state response")
-        normalized = [GreeUnit.from_api(unit) for unit in units if isinstance(unit, dict)]
+            raise GreeProtocolError(
+                "Gree cloud returned an invalid unit-state response"
+            )
+        normalized = [
+            GreeUnit.from_api(unit) for unit in units if isinstance(unit, dict)
+        ]
         return {unit.unique_id: unit for unit in normalized}
 
     async def async_control_unit(
@@ -226,19 +248,28 @@ class GreeCloudApi:
             raise ValueError("wind_target_code must be 1 through 6")
         allowed = {"setTemp", "on_OFF_Status", "mode"}
         if unsupported := set(changes) - allowed:
-            raise ValueError(f"Unsupported control fields: {', '.join(sorted(unsupported))}")
+            raise ValueError(
+                f"Unsupported control fields: {', '.join(sorted(unsupported))}"
+            )
         async with self._write_lock:
             units = await self.async_get_units()
+            validate_control_change(units, unit_key, changes)
             try:
                 unit = units[unit_key]
             except KeyError:
-                raise GreeProtocolError("The selected indoor unit is no longer present") from None
+                raise GreeProtocolError(
+                    "The selected indoor unit is no longer present"
+                ) from None
             if not unit.online:
                 raise GreeControlError("The selected indoor unit is offline")
             if not unit.control_identity_is_valid():
-                raise GreeProtocolError("The indoor unit lacks required DTU control fields")
+                raise GreeProtocolError(
+                    "The indoor unit lacks required DTU control fields"
+                )
             if unit.set_temperature is None:
-                raise GreeProtocolError("The indoor unit has no current set temperature")
+                raise GreeProtocolError(
+                    "The indoor unit has no current set temperature"
+                )
             payload: dict[str, Any] = {
                 "openId": self._open_id,
                 "mac": unit.mac,

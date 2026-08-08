@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 import unittest
@@ -20,13 +19,25 @@ from custom_components.gree_gmv_cloud.crypto import (
     normalize_control_payload,
 )
 from custom_components.gree_gmv_cloud.models import GreeUnit
+from custom_components.gree_gmv_cloud.system_policy import (
+    DIRECTION_COOLING,
+    DIRECTION_HEATING,
+    DIRECTION_UNKNOWN,
+    SOURCE_ACTIVE_SLAVE,
+    SOURCE_MASTER_MODE,
+    SystemModeConflictError,
+    allowed_mode_codes,
+    system_direction,
+    validate_control_change,
+)
 
 SYNTHETIC_UNIT = {
     "roomName": "Synthetic room",
     "mac": "synthetic-device",
     "ip": "1",
     "systemId": "synthetic-system",
-    "bindType": "DTU",
+    "bindType": "dtu",
+    "mainIDU": "1",
     "setTemp": "24.5",
     "enviroTemp": "25.0",
     "on_OFF_Status": "1",
@@ -115,9 +126,87 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(unit.reported_wind_speed, 7)
         self.assertTrue(unit.power)
         self.assertTrue(unit.online)
+        self.assertTrue(unit.is_master)
         self.assertTrue(unit.control_identity_is_valid())
         self.assertNotIn("room_name", unit.safe_diagnostics())
         self.assertNotIn("mac", unit.safe_diagnostics())
+
+
+class SystemPolicyTests(unittest.TestCase):
+    @staticmethod
+    def units(*values):
+        normalized = [GreeUnit.from_api(value) for value in values]
+        return {unit.unique_id: unit for unit in normalized}
+
+    @staticmethod
+    def slave(**updates):
+        return {
+            **SYNTHETIC_UNIT,
+            "roomName": "Synthetic slave",
+            "mac": "synthetic-slave",
+            "ip": "2",
+            "mainIDU": "0",
+            **updates,
+        }
+
+    def test_explicit_master_mode_sets_direction_even_while_off(self):
+        master = {**SYNTHETIC_UNIT, "on_OFF_Status": "0", "mode": "1"}
+        state = system_direction(self.units(master, self.slave()))
+        self.assertEqual(state.direction, DIRECTION_COOLING)
+        self.assertEqual(state.source, SOURCE_MASTER_MODE)
+
+    def test_master_auto_direction_is_inferred_from_powered_slave(self):
+        master = {**SYNTHETIC_UNIT, "mode": "5"}
+        units = self.units(master, self.slave(mode="4", on_OFF_Status="1"))
+        state = system_direction(units)
+        self.assertEqual(state.direction, DIRECTION_HEATING)
+        self.assertEqual(state.source, SOURCE_ACTIVE_SLAVE)
+
+    def test_master_auto_without_directional_slave_remains_unknown(self):
+        master = {**SYNTHETIC_UNIT, "mode": "5"}
+        units = self.units(master, self.slave(mode="3", on_OFF_Status="1"))
+        self.assertEqual(system_direction(units).direction, DIRECTION_UNKNOWN)
+
+    def test_slave_modes_follow_resolved_direction_and_never_include_auto(self):
+        master = {**SYNTHETIC_UNIT, "mode": "4"}
+        units = self.units(master, self.slave(mode="3"))
+        slave = next(unit for unit in units.values() if not unit.is_master)
+        self.assertEqual(allowed_mode_codes(slave, units), (4, 3))
+        self.assertNotIn(5, allowed_mode_codes(slave, units))
+
+    def test_known_opposite_slave_direction_is_rejected_locally(self):
+        units = self.units(SYNTHETIC_UNIT, self.slave(mode="3"))
+        slave = next(unit for unit in units.values() if not unit.is_master)
+        with self.assertRaisesRegex(SystemModeConflictError, "requires heating"):
+            validate_control_change(
+                units,
+                slave.unique_id,
+                {"on_OFF_Status": 1, "mode": 4},
+            )
+
+    def test_unknown_master_auto_direction_is_left_to_controller(self):
+        master = {**SYNTHETIC_UNIT, "mode": "5"}
+        units = self.units(master, self.slave(mode="3", on_OFF_Status="0"))
+        slave = next(unit for unit in units.values() if not unit.is_master)
+        validate_control_change(
+            units,
+            slave.unique_id,
+            {"on_OFF_Status": 1, "mode": 4},
+        )
+        self.assertEqual(
+            allowed_mode_codes(slave, units),
+            (1, 4, 2, 3),
+        )
+
+    def test_slave_auto_is_always_rejected(self):
+        units = self.units(SYNTHETIC_UNIT, self.slave())
+        slave = next(unit for unit in units.values() if not unit.is_master)
+        with self.assertRaisesRegex(SystemModeConflictError, "only on the master"):
+            validate_control_change(
+                units,
+                slave.unique_id,
+                {"on_OFF_Status": 1, "mode": 5},
+            )
 
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
@@ -135,7 +224,9 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(units), 1)
         request = session.requests[0]
         self.assertTrue(request[1].endswith("/gree2/app/v2.0/control/getUnits"))
-        self.assertEqual(request[2]["headers"]["Authorization"], "Bearer synthetic-token")
+        self.assertEqual(
+            request[2]["headers"]["Authorization"], "Bearer synthetic-token"
+        )
         self.assertEqual(request[2]["data"]["tyFlag"], "false")
 
     async def test_refresh_updates_token_and_calls_secure_persistence_callback(self):
@@ -185,7 +276,9 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         captured = []
         with patch(
             "custom_components.gree_gmv_cloud.api.encrypt_control_payload",
-            side_effect=lambda payload: captured.append(payload) or {"requestData": "x", "encrypted": "y"},
+            side_effect=lambda payload: (
+                captured.append(payload) or {"requestData": "x", "encrypted": "y"}
+            ),
         ):
             await client.async_control_unit(
                 unit_key,
@@ -195,7 +288,9 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured[0]["windSpeed"], 1)
         self.assertNotEqual(captured[0]["windSpeed"], SYNTHETIC_UNIT["windSpeed"])
         self.assertEqual(captured[0]["setTemp"], 23)
-        self.assertEqual(len([r for r in session.requests if r[1].endswith("controlProduct")]), 1)
+        self.assertEqual(
+            len([r for r in session.requests if r[1].endswith("controlProduct")]), 1
+        )
 
     async def test_transport_exception_is_sanitized(self):
         secret = "sensitive-old-token"
@@ -224,16 +319,18 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             uid="synthetic-uid",
         )
         unit_key = GreeUnit.from_api(SYNTHETIC_UNIT).unique_id
-        with patch(
-            "custom_components.gree_gmv_cloud.api.encrypt_control_payload",
-            return_value={"requestData": "x", "encrypted": "y"},
+        with (
+            patch(
+                "custom_components.gree_gmv_cloud.api.encrypt_control_payload",
+                return_value={"requestData": "x", "encrypted": "y"},
+            ),
+            self.assertRaises(GreeControlError) as raised,
         ):
-            with self.assertRaises(GreeControlError) as raised:
-                await client.async_control_unit(
-                    unit_key,
-                    wind_target_code=1,
-                    changes={"on_OFF_Status": 0},
-                )
+            await client.async_control_unit(
+                unit_key,
+                wind_target_code=1,
+                changes={"on_OFF_Status": 0},
+            )
         self.assertTrue(raised.exception.ambiguous_write)
         self.assertEqual(len(session.requests), 2)
 

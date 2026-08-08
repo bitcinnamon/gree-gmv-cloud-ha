@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 async def async_setup_entry(hass, entry) -> bool:
     """Set up Gree GMV Cloud from a UI config entry."""
     from homeassistant.helpers.aiohttp_client import async_get_clientsession

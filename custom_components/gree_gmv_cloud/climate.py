@@ -24,6 +24,7 @@ from .const import (
     MODE_DRY,
     MODE_FAN,
     MODE_HEAT,
+    REPORTED_FAN_LEVELS,
     TEMPERATURE_STEP,
 )
 from .coordinator import FanTargetUnknownError, GreeCoordinator
@@ -39,14 +40,6 @@ MODE_TO_HVAC = {
     MODE_AUTO: HVACMode.AUTO,
 }
 HVAC_TO_MODE = {value: key for key, value in MODE_TO_HVAC.items()}
-HVAC_MODES = [
-    HVACMode.OFF,
-    HVACMode.COOL,
-    HVACMode.HEAT,
-    HVACMode.DRY,
-    HVACMode.FAN_ONLY,
-    HVACMode.AUTO,
-]
 
 
 async def async_setup_entry(
@@ -70,7 +63,6 @@ class GreeGmvClimate(CoordinatorEntity[GreeCoordinator], ClimateEntity):
     _attr_min_temp = MIN_TEMPERATURE
     _attr_max_temp = MAX_TEMPERATURE
     _attr_target_temperature_step = TEMPERATURE_STEP
-    _attr_hvac_modes = HVAC_MODES
     _attr_fan_modes = FAN_MODES
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
@@ -96,13 +88,28 @@ class GreeGmvClimate(CoordinatorEntity[GreeCoordinator], ClimateEntity):
 
     @property
     def available(self) -> bool:
-        return super().available and self._unit_key in self.coordinator.data and self.unit.online
+        return (
+            super().available
+            and self._unit_key in self.coordinator.data
+            and self.unit.online
+        )
 
     @property
     def hvac_mode(self) -> HVACMode | None:
         if not self.unit.power:
             return HVACMode.OFF
         return MODE_TO_HVAC.get(self.unit.mode)
+
+    @property
+    def hvac_modes(self) -> list[HVACMode]:
+        """Expose auto only on the master and follow the active GMV direction."""
+        modes = [HVACMode.OFF]
+        modes.extend(
+            MODE_TO_HVAC[mode]
+            for mode in self.coordinator.allowed_mode_codes(self._unit_key)
+            if mode in MODE_TO_HVAC
+        )
+        return modes
 
     @property
     def hvac_action(self) -> HVACAction | None:
@@ -125,8 +132,15 @@ class GreeGmvClimate(CoordinatorEntity[GreeCoordinator], ClimateEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        direction = self.coordinator.system_direction()
         return {
-            "reported_fan_speed": self.unit.reported_wind_speed,
+            "is_master_unit": self.unit.is_master,
+            "system_direction": direction.direction,
+            "system_direction_source": direction.source,
+            "reported_fan_level": REPORTED_FAN_LEVELS.get(
+                self.unit.reported_wind_speed
+            ),
+            "reported_fan_status_code": self.unit.reported_wind_speed,
             "cloud_mode_code": self.unit.mode,
             "cloud_power": self.unit.power,
             "cloud_online": self.unit.online,
@@ -169,19 +183,36 @@ class GreeGmvClimate(CoordinatorEntity[GreeCoordinator], ClimateEntity):
         if temperature is None:
             return
         if not self.unit.power:
-            raise HomeAssistantError("Turn the indoor unit on before changing temperature")
+            raise HomeAssistantError(
+                "Turn the indoor unit on before changing temperature"
+            )
         if self.unit.mode == MODE_AUTO:
-            raise HomeAssistantError("The mini-program disables temperature control in auto mode")
+            raise HomeAssistantError(
+                "The mini-program disables temperature control in auto mode"
+            )
         value = float(temperature)
-        if value < MIN_TEMPERATURE or value > MAX_TEMPERATURE or not value.is_integer():
-            raise HomeAssistantError("Temperature must be a whole degree from 16 to 30")
-        await self._async_control({"setTemp": int(value)})
+        half_steps = value * 2
+        if (
+            value < MIN_TEMPERATURE
+            or value > MAX_TEMPERATURE
+            or abs(half_steps - round(half_steps)) > 1e-6
+        ):
+            raise HomeAssistantError(
+                "Temperature must use 0.5-degree steps from 16 to 30"
+            )
+        normalized = round(half_steps) / 2
+        control_value: int | float = (
+            int(normalized) if normalized.is_integer() else normalized
+        )
+        await self._async_control({"setTemp": control_value})
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         if fan_mode not in FAN_MODES:
             raise HomeAssistantError(f"Unsupported fan mode: {fan_mode}")
         if not self.unit.power:
-            raise HomeAssistantError("Turn the indoor unit on before selecting a fan mode")
+            raise HomeAssistantError(
+                "Turn the indoor unit on before selecting a fan mode"
+            )
         if self.unit.mode in (MODE_AUTO, MODE_DRY):
             raise HomeAssistantError(
                 "The mini-program disables fan adjustment in auto and dry modes"

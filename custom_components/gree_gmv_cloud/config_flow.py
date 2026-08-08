@@ -6,7 +6,6 @@ from hashlib import sha256
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
@@ -67,7 +66,7 @@ class GreeGmvCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except GreeApiError:
                 errors["base"] = "cannot_connect"
-            except Exception:
+            except Exception:  # noqa: BLE001 - HA flow must render unknown failures
                 errors["base"] = "unknown"
             else:
                 account_key = sha256(
@@ -88,9 +87,7 @@ class GreeGmvCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reauth(self, entry_data: dict[str, Any]):
         return await self.async_step_reauth_confirm()
 
-    async def async_step_reauth_confirm(
-        self, user_input: dict[str, Any] | None = None
-    ):
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None):
         entry = self._get_reauth_entry()
         errors: dict[str, str] = {}
         if user_input is not None:

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import base64
-from functools import lru_cache
 import json
 import secrets
 import string
+from functools import lru_cache
 from typing import Any
 
 from cryptography.hazmat.primitives import serialization
@@ -77,7 +77,9 @@ def encrypt_control_payload(
     """Create the AES-CBC plus RSA PKCS#1 v1.5 request envelope."""
     normalized = normalize_control_payload(payload)
     key_text = session_key or generate_session_key()
-    if len(key_text) != 16 or any(char not in SESSION_KEY_ALPHABET for char in key_text):
+    if len(key_text) != 16 or any(
+        char not in SESSION_KEY_ALPHABET for char in key_text
+    ):
         raise ValueError("session_key must be 16 ASCII alphanumeric characters")
     key = key_text.encode("ascii")
     plaintext = json.dumps(

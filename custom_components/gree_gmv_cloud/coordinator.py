@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import GreeApiError, GreeAuthError, GreeCloudApi
+from .api import GreeApiError, GreeAuthError, GreeCloudApi, GreeControlError
 from .const import (
     CONF_FAN_TARGETS,
     DEFAULT_SCAN_INTERVAL,
@@ -19,6 +18,7 @@ from .const import (
     WRITE_READBACK_DELAY,
 )
 from .models import GreeUnit
+from .system_policy import DirectionState, allowed_mode_codes, system_direction
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +51,9 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
         try:
             return await self.api.async_get_units()
         except GreeAuthError as err:
-            raise ConfigEntryAuthFailed("Gree GMV cloud credential was rejected") from err
+            raise ConfigEntryAuthFailed(
+                "Gree GMV cloud credential was rejected"
+            ) from err
         except GreeApiError as err:
             raise UpdateFailed(str(err)) from err
 
@@ -60,6 +62,14 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
         targets = self.entry.options.get(CONF_FAN_TARGETS, {})
         target = targets.get(unit_key) if isinstance(targets, dict) else None
         return target if target in FAN_MODE_TO_CONTROL else None
+
+    def system_direction(self) -> DirectionState:
+        """Return the system direction visible in the latest cloud snapshot."""
+        return system_direction(self.data)
+
+    def allowed_mode_codes(self, unit_key: str) -> tuple[int, ...]:
+        """Return modes selectable for this master/slave unit right now."""
+        return allowed_mode_codes(self.data[unit_key], self.data)
 
     def _save_fan_target(self, unit_key: str, fan_mode: str) -> None:
         targets = dict(self.entry.options.get(CONF_FAN_TARGETS, {}))
@@ -84,11 +94,17 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
                 "or fan-only mode, choose a fan mode in Home Assistant once before "
                 "using power, mode, or temperature controls."
             )
-        await self.api.async_control_unit(
-            unit_key,
-            wind_target_code=FAN_MODE_TO_CONTROL[fan_mode],
-            changes=changes,
-        )
+        try:
+            await self.api.async_control_unit(
+                unit_key,
+                wind_target_code=FAN_MODE_TO_CONTROL[fan_mode],
+                changes=changes,
+            )
+        except GreeControlError:
+            # Never retry a write. A prompt poll is safe and helps resolve both
+            # definitive direction conflicts and ambiguous transport failures.
+            await self.async_request_refresh()
+            raise
         if explicit_fan_mode is not None:
             self._save_fan_target(unit_key, explicit_fan_mode)
         await asyncio.sleep(WRITE_READBACK_DELAY)

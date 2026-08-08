@@ -18,15 +18,23 @@ The integration and its authors are not affiliated with or endorsed by Gree Elec
 ## Features
 
 - Per-room power control.
-- Cooling, heating, dry, fan-only, and auto modes.
-- Whole-degree target temperatures from 16–30 °C.
+- Cooling, heating, dry, fan-only, and master-only auto mode.
+- Half-degree target temperatures from 16–30 °C.
 - Automatic plus five explicit fan targets.
 - Current room/controller temperature when supplied by the cloud.
 - Online, configured mode, reported fan level, and error-presence attributes.
 - Automatic Bearer-token refresh six hours before JWT expiry.
 - Home Assistant reauthentication when the cloud rejects a credential.
+- Automatic master-unit discovery from the cloud's `mainIDU` field.
+- Master/slave mode filtering against the visible cooling/heating direction.
 
 The API reports configured mode and power but no verified compressor-demand bit. The integration therefore does not invent an active cooling/heating `hvac_action`.
+
+## Master/slave direction behavior
+
+The tested GMV project has one master wired controller. Only that master can select auto or change the system between cooling and heating. A slave never exposes auto. In cooling direction, slaves offer cooling, dry, and fan-only; in heating direction, they offer heating and fan-only.
+
+Master auto still activates a real cooling or heating direction: both the auto lamp and the corresponding direction lamp illuminate on the wired controller. However, the captured `getUnits` response contains only `mode=5` and no second field for that lamp. When an active slave reports a directional mode, the integration uses it as the visible direction. If there is no such evidence, both cooling-side and heating-side slave choices remain visible and one command is submitted; the GMV controller is allowed to accept or reject it. A definite cloud rejection is surfaced to Home Assistant and the state is refreshed immediately. Writes are never retried after transport ambiguity.
 
 ## Installation with HACS
 
@@ -68,15 +76,16 @@ The mini-program's current protocol writes a complete target state. Its status a
 4. Confirm the wired controller and airflow after the 15-second readback.
 5. Repeat this calibration once for each room before using power, mode, or temperature automations.
 
-Dry and auto modes follow the current mini-program UI restrictions and do not allow fan adjustment. Temperature changes are blocked while the room is off or in auto mode.
+Dry and auto modes follow the current mini-program UI restrictions and do not allow fan adjustment. Temperature changes are blocked while the room is off or in auto mode. Mode changes may restore that mode's remembered setpoint, so the integration always polls the actual state after a write.
 
 ## Known limitations
 
 - Private cloud endpoints may change or be withdrawn without notice.
 - Initial credential acquisition is manual; the integration cannot mint a WeChat `jsCode`.
 - Refreshing an already expired token has not been verified. A long Home Assistant outage may therefore require importing a new token.
-- New indoor units added after initial setup are not dynamically registered in version 0.1.0.
-- Fan write/read semantics were confirmed only for the tested installation and remain guarded by explicit per-room calibration.
+- New indoor units added after initial setup are not dynamically registered in version 0.1.1.
+- The master-auto direction lamp is not present in the captured cloud response. Direction inference and opposite-direction rejection behavior should be rechecked on other GMV generations.
+- Fan command values `1..6` and reported execution values `3..7` have different meanings. The five fixed execution levels were calibrated on the tested installation; the target remains guarded by explicit per-room calibration.
 
 ## Removal
 

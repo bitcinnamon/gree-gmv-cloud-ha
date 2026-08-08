@@ -17,7 +17,7 @@ jobs:
       - name: Build HACS release archive
         working-directory: custom_components/gree_gmv_cloud
         run: >-
-          zip -r ../../../gree_gmv_cloud.zip .
+          zip -r ../../gree_gmv_cloud.zip .
           -x '__pycache__/' '__pycache__/*' '*/__pycache__/*' '*.pyc'
       - name: Upload HACS release archive
         env:

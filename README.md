@@ -1,5 +1,7 @@
 # Gree GMV Cloud for Home Assistant
 
+[简体中文](README.zh-CN.md) | English
+
 An unofficial Home Assistant custom integration for a Gree GMV central air-conditioning project exposed through the WeChat mini-program **Gree Central Air Conditioner Assistant** (格力中央空调微助手).
 
 This integration was developed for one owner-operated installation with a `GMV-H200WL/H2S` outdoor unit, `XC71-33/H2` wired controllers, and an existing cellular DTU. It does **not** use the LAN protocol implemented by the standard Home Assistant Gree integration.

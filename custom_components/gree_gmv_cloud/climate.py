@@ -16,7 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .api import GreeApiError
 from .const import (
     DOMAIN,
-    FAN_MODES,
+    HOMEKIT_FAN_MODES,
     MAX_TEMPERATURE,
     MIN_TEMPERATURE,
     MODE_AUTO,
@@ -28,6 +28,11 @@ from .const import (
     TEMPERATURE_STEP,
 )
 from .coordinator import FanTargetUnknownError, GreeCoordinator
+from .fan_policy import (
+    control_target_for_homekit_fan_mode,
+    homekit_fan_mode_from_state,
+    should_send_fan_control,
+)
 from .models import GreeUnit
 
 PARALLEL_UPDATES = 0
@@ -63,7 +68,7 @@ class GreeGmvClimate(CoordinatorEntity[GreeCoordinator], ClimateEntity):
     _attr_min_temp = MIN_TEMPERATURE
     _attr_max_temp = MAX_TEMPERATURE
     _attr_target_temperature_step = TEMPERATURE_STEP
-    _attr_fan_modes = FAN_MODES
+    _attr_fan_modes = HOMEKIT_FAN_MODES
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.FAN_MODE
@@ -127,8 +132,11 @@ class GreeGmvClimate(CoordinatorEntity[GreeCoordinator], ClimateEntity):
 
     @property
     def fan_mode(self) -> str | None:
-        # Reported 3..7 is an execution level and cannot reveal an auto target.
-        return self.coordinator.fan_target(self._unit_key)
+        return homekit_fan_mode_from_state(
+            self.coordinator.fan_target(self._unit_key),
+            reported_wind_speed=self.unit.reported_wind_speed,
+            power=self.unit.power,
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -145,6 +153,7 @@ class GreeGmvClimate(CoordinatorEntity[GreeCoordinator], ClimateEntity):
             "cloud_power": self.unit.power,
             "cloud_online": self.unit.online,
             "cloud_error_present": self.unit.error_present,
+            "fan_target_mode": self.coordinator.fan_target(self._unit_key),
             "fan_target_known": self.fan_mode is not None,
         }
 
@@ -207,14 +216,18 @@ class GreeGmvClimate(CoordinatorEntity[GreeCoordinator], ClimateEntity):
         await self._async_control({"setTemp": control_value})
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
-        if fan_mode not in FAN_MODES:
+        if fan_mode not in HOMEKIT_FAN_MODES:
             raise HomeAssistantError(f"Unsupported fan mode: {fan_mode}")
-        if not self.unit.power or self.unit.mode in (MODE_AUTO, MODE_DRY):
+        target = control_target_for_homekit_fan_mode(fan_mode)
+        if not should_send_fan_control(power=self.unit.power, mode=self.unit.mode):
             # The cloud requires a complete target state for future writes, but
             # its status response cannot distinguish auto from a fixed target.
             # When the room is off, or its current mode does not allow fan
             # adjustment, save an explicit HA selection without a cloud write.
-            self.coordinator.save_fan_target(self._unit_key, fan_mode)
+            self.coordinator.save_fan_target(self._unit_key, target)
             self.async_write_ha_state()
             return
-        await self._async_control({}, explicit_fan_mode=fan_mode)
+        try:
+            await self.coordinator.async_control_fan(self._unit_key, target)
+        except (FanTargetUnknownError, GreeApiError, ValueError) as err:
+            raise HomeAssistantError(str(err)) from err

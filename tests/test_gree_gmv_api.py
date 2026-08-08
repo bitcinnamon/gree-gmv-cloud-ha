@@ -13,14 +13,18 @@ from custom_components.gree_gmv_cloud.api import (
     GreeControlError,
     decode_jwt_timing,
 )
+from custom_components.gree_gmv_cloud.const import HOMEKIT_FAN_MODES
 from custom_components.gree_gmv_cloud.crypto import (
     CONTROL_FIELDS,
     encrypt_control_payload,
     normalize_control_payload,
 )
 from custom_components.gree_gmv_cloud.fan_policy import (
+    control_target_for_homekit_fan_mode,
     effective_fan_target,
+    homekit_fan_mode_from_state,
     reconcile_fixed_fan_target,
+    should_send_fan_control,
 )
 from custom_components.gree_gmv_cloud.models import GreeUnit
 from custom_components.gree_gmv_cloud.system_policy import (
@@ -173,6 +177,42 @@ class FanPolicyTests(unittest.TestCase):
                     ),
                     "high",
                 )
+
+    def test_homekit_four_step_modes_map_to_fixed_levels_1_2_3_5(self):
+        self.assertEqual(HOMEKIT_FAN_MODES, ["off", "low", "middle", "medium", "high"])
+        self.assertEqual(control_target_for_homekit_fan_mode("off"), "auto")
+        self.assertEqual(control_target_for_homekit_fan_mode("low"), "low")
+        self.assertEqual(control_target_for_homekit_fan_mode("middle"), "medium_low")
+        self.assertEqual(control_target_for_homekit_fan_mode("medium"), "medium")
+        self.assertEqual(control_target_for_homekit_fan_mode("high"), "high")
+
+    def test_homekit_state_uses_server_report_for_fixed_targets(self):
+        expected = {3: "low", 4: "middle", 5: "medium", 6: "medium", 7: "high"}
+        for reported, homekit_mode in expected.items():
+            with self.subTest(reported=reported):
+                self.assertEqual(
+                    homekit_fan_mode_from_state(
+                        "high", reported_wind_speed=reported, power=True
+                    ),
+                    homekit_mode,
+                )
+
+    def test_homekit_state_renders_auto_and_power_off_at_zero_percent(self):
+        self.assertEqual(
+            homekit_fan_mode_from_state("auto", reported_wind_speed=7, power=True),
+            "off",
+        )
+        self.assertEqual(
+            homekit_fan_mode_from_state("high", reported_wind_speed=7, power=False),
+            "off",
+        )
+
+    def test_powered_off_unit_never_sends_fan_control(self):
+        self.assertFalse(should_send_fan_control(power=False, mode=1))
+        self.assertFalse(should_send_fan_control(power=False, mode=5))
+        self.assertTrue(should_send_fan_control(power=True, mode=1))
+        self.assertFalse(should_send_fan_control(power=True, mode=2))
+        self.assertFalse(should_send_fan_control(power=True, mode=5))
 
 
 class SystemPolicyTests(unittest.TestCase):

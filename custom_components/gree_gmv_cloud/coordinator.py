@@ -15,14 +15,17 @@ from .api import GreeApiError, GreeAuthError, GreeCloudApi, GreeControlError
 from .const import (
     CONF_FAN_TARGETS,
     DEFAULT_SCAN_INTERVAL,
+    FAN_AUTO,
     FAN_MODE_TO_CONTROL,
     FAN_TARGET_RECONCILE_GRACE,
     WRITE_READBACK_DELAY,
 )
 from .fan_policy import (
+    FAN_ADJUSTABLE_MODES,
     FAN_CONTROL_TO_MODE,
     effective_fan_target,
     reconcile_fixed_fan_target,
+    reported_fixed_fan_target,
 )
 from .models import GreeUnit
 from .system_policy import DirectionState, allowed_mode_codes, system_direction
@@ -54,6 +57,9 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
         self.entry = entry
         self.api = api
         self._fan_target_hold_until: dict[str, float] = {}
+        self._fan_control_locks: dict[str, asyncio.Lock] = {}
+        self._fan_control_generation: dict[str, int] = {}
+        self._fan_control_events: dict[str, asyncio.Event] = {}
 
     async def _async_update_data(self) -> dict[str, GreeUnit]:
         try:
@@ -121,6 +127,8 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
         changes: dict[str, int | float],
         *,
         explicit_fan_mode: str | None = None,
+        fan_control_generation: int | None = None,
+        superseded_event: asyncio.Event | None = None,
     ) -> None:
         """Perform one guarded write and wait for a fresh cloud readback."""
         fan_mode = explicit_fan_mode or self.fan_target(unit_key)
@@ -154,5 +162,95 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
             )
         elif applied_fan_code != requested_fan_code:
             self.save_fan_target(unit_key, FAN_CONTROL_TO_MODE[applied_fan_code])
-        await asyncio.sleep(WRITE_READBACK_DELAY)
+        if await self._async_fan_command_was_superseded(superseded_event):
+            return
         await self.async_request_refresh()
+        if (
+            fan_control_generation is not None
+            and self._fan_control_generation.get(unit_key) != fan_control_generation
+        ):
+            return
+        if explicit_fan_mode is None:
+            return
+        if explicit_fan_mode == FAN_AUTO:
+            self._fan_target_hold_until.pop(unit_key, None)
+            return
+
+        expected_reported_code = FAN_MODE_TO_CONTROL[explicit_fan_mode] + 1
+        unit = self.data.get(unit_key)
+        if unit is not None and unit.reported_wind_speed == expected_reported_code:
+            self._fan_target_hold_until.pop(unit_key, None)
+            return
+
+        # A cloud success response does not prove that the DTU has applied the
+        # command. Poll once more without resending, then roll HA back to the
+        # physical level if the requested fixed target is still unconfirmed.
+        if await self._async_fan_command_was_superseded(superseded_event):
+            return
+        await self.async_request_refresh()
+        if (
+            fan_control_generation is not None
+            and self._fan_control_generation.get(unit_key) != fan_control_generation
+        ):
+            return
+        unit = self.data.get(unit_key)
+        if unit is not None and unit.reported_wind_speed == expected_reported_code:
+            self._fan_target_hold_until.pop(unit_key, None)
+            return
+        self._fan_target_hold_until.pop(unit_key, None)
+        if unit is not None:
+            reported_target = reported_fixed_fan_target(unit.reported_wind_speed)
+            if (
+                reported_target is not None
+                and unit.power
+                and unit.mode in FAN_ADJUSTABLE_MODES
+            ):
+                self.save_fan_target(unit_key, reported_target)
+        raise GreeControlError(
+            "Gree cloud accepted the fan command, but the indoor unit did not "
+            "confirm the requested fixed level"
+        )
+
+    async def async_control_fan(
+        self,
+        unit_key: str,
+        fan_mode: str,
+    ) -> None:
+        """Serialize fan writes per room and discard superseded queued writes."""
+        if previous_event := self._fan_control_events.get(unit_key):
+            previous_event.set()
+        superseded_event = asyncio.Event()
+        self._fan_control_events[unit_key] = superseded_event
+        generation = self._fan_control_generation.get(unit_key, 0) + 1
+        self._fan_control_generation[unit_key] = generation
+        lock = self._fan_control_locks.setdefault(unit_key, asyncio.Lock())
+        async with lock:
+            if self._fan_control_generation.get(unit_key) != generation:
+                return
+            try:
+                await self.async_control(
+                    unit_key,
+                    {},
+                    explicit_fan_mode=fan_mode,
+                    fan_control_generation=generation,
+                    superseded_event=superseded_event,
+                )
+            finally:
+                if self._fan_control_events.get(unit_key) is superseded_event:
+                    self._fan_control_events.pop(unit_key, None)
+
+    @staticmethod
+    async def _async_fan_command_was_superseded(
+        superseded_event: asyncio.Event | None,
+    ) -> bool:
+        """Wait for readback time or return early when a newer fan write arrives."""
+        if superseded_event is None:
+            await asyncio.sleep(WRITE_READBACK_DELAY)
+            return False
+        try:
+            await asyncio.wait_for(
+                superseded_event.wait(), timeout=WRITE_READBACK_DELAY
+            )
+        except TimeoutError:
+            return False
+        return True

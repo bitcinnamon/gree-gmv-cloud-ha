@@ -27,7 +27,9 @@ MODE_HEAT = 4
 MODE_AUTO = 5
 
 FAN_AUTO = "auto"
+FAN_OFF = "off"
 FAN_LOW = "low"
+FAN_MIDDLE = "middle"
 FAN_MEDIUM_LOW = "medium_low"
 FAN_MEDIUM = "medium"
 FAN_MEDIUM_HIGH = "medium_high"
@@ -42,6 +44,12 @@ FAN_MODE_TO_CONTROL = {
     FAN_HIGH: 6,
 }
 FAN_MODES = list(FAN_MODE_TO_CONTROL)
+
+# Home Assistant's HomeKit climate adapter recognizes exactly these four
+# standard fixed-speed names. Expose "off" as the 0% step but translate it to
+# Gree automatic fan; room power remains controlled by the climate switch.
+# Fixed level 4 is omitted so the linked fan can expose four stable steps.
+HOMEKIT_FAN_MODES = [FAN_OFF, FAN_LOW, FAN_MIDDLE, FAN_MEDIUM, FAN_HIGH]
 
 REPORTED_FAN_LEVELS = {
     3: 1,

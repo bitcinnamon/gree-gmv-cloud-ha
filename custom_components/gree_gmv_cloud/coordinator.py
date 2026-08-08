@@ -71,7 +71,8 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
         """Return modes selectable for this master/slave unit right now."""
         return allowed_mode_codes(self.data[unit_key], self.data)
 
-    def _save_fan_target(self, unit_key: str, fan_mode: str) -> None:
+    def save_fan_target(self, unit_key: str, fan_mode: str) -> None:
+        """Persist an explicit HA fan target without inferring cloud state."""
         targets = dict(self.entry.options.get(CONF_FAN_TARGETS, {}))
         targets[unit_key] = fan_mode
         self.hass.config_entries.async_update_entry(
@@ -106,6 +107,6 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
             await self.async_request_refresh()
             raise
         if explicit_fan_mode is not None:
-            self._save_fan_target(unit_key, explicit_fan_mode)
+            self.save_fan_target(unit_key, explicit_fan_mode)
         await asyncio.sleep(WRITE_READBACK_DELAY)
         await self.async_request_refresh()

@@ -72,9 +72,12 @@ The mini-program's current protocol writes a complete target state. Its status a
 
 1. Let the integration complete at least one successful state refresh.
 2. Pick one occupied test room that is already on in cooling, heating, or fan-only mode.
-3. Explicitly choose the intended fan mode once in Home Assistant.
-4. Confirm the wired controller and airflow after the 15-second readback.
-5. Repeat this calibration once for each room before using power, mode, or temperature automations.
+3. Explicitly choose the intended fan mode once in Home Assistant. If the room
+   is off, in auto, or in dry mode, version 0.1.3 and later save that target
+   locally without turning the indoor unit on or sending a cloud control request.
+4. For a room that is already running, confirm the wired controller and airflow
+   after the 15-second readback.
+5. Repeat this calibration once for each room before using power, mode, or temperature automations. The selected targets are persisted in the Home Assistant config entry and survive restarts and upgrades.
 
 Dry and auto modes follow the current mini-program UI restrictions and do not allow fan adjustment. Temperature changes are blocked while the room is off or in auto mode. Mode changes may restore that mode's remembered setpoint, so the integration always polls the actual state after a write.
 
@@ -83,7 +86,7 @@ Dry and auto modes follow the current mini-program UI restrictions and do not al
 - Private cloud endpoints may change or be withdrawn without notice.
 - Initial credential acquisition is manual; the integration cannot mint a WeChat `jsCode`.
 - Refreshing an already expired token has not been verified. A long Home Assistant outage may therefore require importing a new token.
-- New indoor units added after initial setup are not dynamically registered in version 0.1.2.
+- New indoor units added after initial setup are not dynamically registered in version 0.1.3.
 - The master-auto direction lamp is not present in the captured cloud response. Direction inference and opposite-direction rejection behavior should be rechecked on other GMV generations.
 - Fan command values `1..6` and reported execution values `3..7` have different meanings. The five fixed execution levels were calibrated on the tested installation; the target remains guarded by explicit per-room calibration.
 

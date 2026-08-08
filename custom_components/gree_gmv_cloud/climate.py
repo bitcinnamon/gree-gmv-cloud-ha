@@ -209,12 +209,12 @@ class GreeGmvClimate(CoordinatorEntity[GreeCoordinator], ClimateEntity):
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         if fan_mode not in FAN_MODES:
             raise HomeAssistantError(f"Unsupported fan mode: {fan_mode}")
-        if not self.unit.power:
-            raise HomeAssistantError(
-                "Turn the indoor unit on before selecting a fan mode"
-            )
-        if self.unit.mode in (MODE_AUTO, MODE_DRY):
-            raise HomeAssistantError(
-                "The mini-program disables fan adjustment in auto and dry modes"
-            )
+        if not self.unit.power or self.unit.mode in (MODE_AUTO, MODE_DRY):
+            # The cloud requires a complete target state for future writes, but
+            # its status response cannot distinguish auto from a fixed target.
+            # When the room is off, or its current mode does not allow fan
+            # adjustment, save an explicit HA selection without a cloud write.
+            self.coordinator.save_fan_target(self._unit_key, fan_mode)
+            self.async_write_ha_state()
+            return
         await self._async_control({}, explicit_fan_mode=fan_mode)

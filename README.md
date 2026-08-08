@@ -68,9 +68,11 @@ Home Assistant stores Config Entry data in its configuration directory. Protect 
 
 ## Fan-target policy
 
-The mini-program's current protocol writes a complete target state. Its status and command fan-speed values are offset, so an automatic target cannot be inferred from the reported execution level. Version 0.1.0 uses automatic fan as the safe installation default for every room that has no explicit Home Assistant selection.
+The mini-program's current protocol writes a complete target state. Its status and command fan-speed values are offset, so an automatic target cannot be inferred from the reported execution level. The integration uses automatic fan as the safe installation default for every room that has no explicit Home Assistant selection.
 
 An explicit per-room fan selection overrides that default and is persisted in the Home Assistant config entry across restarts and upgrades. When a room is off, in auto, or in dry mode, changing the target only updates Home Assistant and does not send a cloud control request. When a room is already running in cooling, heating, or fan-only mode, selecting a fan target submits a normal full-state write and should be verified at the wired controller.
+
+While a fixed target is cached, a different fixed execution level reported by an active cooling, heating, or fan-only unit is treated as a wired-controller change. The integration adopts that level during polling and rechecks it immediately before any full-state write, so changing temperature does not restore a stale fixed fan target. An automatic target is never inferred from execution level and is always preserved as automatic.
 
 Dry and auto modes follow the current mini-program UI restrictions and do not allow fan adjustment. Temperature changes are blocked while the room is off or in auto mode. Mode changes may restore that mode's remembered setpoint, so the integration always polls the actual state after a write.
 
@@ -79,9 +81,10 @@ Dry and auto modes follow the current mini-program UI restrictions and do not al
 - Private cloud endpoints may change or be withdrawn without notice.
 - Initial credential acquisition is manual; the integration cannot mint a WeChat `jsCode`.
 - Refreshing an already expired token has not been verified. A long Home Assistant outage may therefore require importing a new token.
-- New indoor units added after initial setup are not dynamically registered in version 0.1.0.
+- New indoor units added after initial setup are not dynamically registered in version 0.1.2.
 - The master-auto direction lamp is not present in the captured cloud response. Direction inference and opposite-direction rejection behavior should be rechecked on other GMV generations.
 - Fan command values `1..6` and reported execution values `3..7` have different meanings. The five fixed execution levels were calibrated on the tested installation; an unconfigured target deliberately defaults to automatic rather than being inferred from execution speed.
+- Because the cloud reports execution level but not target type, a wired-controller change from a fixed target to automatic cannot be distinguished from a change to the currently executing fixed level. Select automatic once in Home Assistant after making that particular external change.
 
 ## Removal
 

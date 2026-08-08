@@ -18,7 +18,10 @@ from custom_components.gree_gmv_cloud.crypto import (
     encrypt_control_payload,
     normalize_control_payload,
 )
-from custom_components.gree_gmv_cloud.fan_policy import effective_fan_target
+from custom_components.gree_gmv_cloud.fan_policy import (
+    effective_fan_target,
+    reconcile_fixed_fan_target,
+)
 from custom_components.gree_gmv_cloud.models import GreeUnit
 from custom_components.gree_gmv_cloud.system_policy import (
     DIRECTION_COOLING,
@@ -141,6 +144,35 @@ class FanPolicyTests(unittest.TestCase):
 
     def test_explicit_target_overrides_default(self):
         self.assertEqual(effective_fan_target("medium_high"), "medium_high")
+
+    def test_auto_target_is_never_inferred_from_execution_level(self):
+        self.assertEqual(
+            reconcile_fixed_fan_target(
+                "auto", reported_wind_speed=3, power=True, mode=1
+            ),
+            "auto",
+        )
+
+    def test_external_fixed_level_replaces_stale_fixed_target(self):
+        self.assertEqual(
+            reconcile_fixed_fan_target(
+                "high", reported_wind_speed=3, power=True, mode=1
+            ),
+            "low",
+        )
+
+    def test_non_adjustable_state_does_not_reconcile_fixed_target(self):
+        for power, mode in ((False, 1), (True, 2), (True, 5)):
+            with self.subTest(power=power, mode=mode):
+                self.assertEqual(
+                    reconcile_fixed_fan_target(
+                        "high",
+                        reported_wind_speed=3,
+                        power=power,
+                        mode=mode,
+                    ),
+                    "high",
+                )
 
 
 class SystemPolicyTests(unittest.TestCase):
@@ -302,6 +334,42 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             len([r for r in session.requests if r[1].endswith("controlProduct")]), 1
         )
+
+    async def test_full_state_write_reconciles_external_fixed_fan_change(self):
+        externally_lowered = {**SYNTHETIC_UNIT, "windSpeed": "3"}
+        session = FakeSession(
+            [
+                {
+                    "success": True,
+                    "code": 0,
+                    "data": {"units": [externally_lowered]},
+                },
+                {"success": True, "code": 0},
+            ]
+        )
+        client = GreeCloudApi(
+            session,
+            token="synthetic-token",
+            open_id="synthetic-open-id",
+            uid="synthetic-uid",
+        )
+        unit_key = GreeUnit.from_api(externally_lowered).unique_id
+        captured = []
+        with patch(
+            "custom_components.gree_gmv_cloud.api.encrypt_control_payload",
+            side_effect=lambda payload: (
+                captured.append(payload) or {"requestData": "x", "encrypted": "y"}
+            ),
+        ):
+            applied_code = await client.async_control_unit(
+                unit_key,
+                wind_target_code=6,
+                changes={"setTemp": 26},
+                reconcile_reported_fan=True,
+            )
+        self.assertEqual(applied_code, 2)
+        self.assertEqual(captured[0]["windSpeed"], 2)
+        self.assertEqual(captured[0]["setTemp"], 26)
 
     async def test_transport_exception_is_sanitized(self):
         secret = "sensitive-old-token"

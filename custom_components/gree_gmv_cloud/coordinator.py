@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -15,9 +16,14 @@ from .const import (
     CONF_FAN_TARGETS,
     DEFAULT_SCAN_INTERVAL,
     FAN_MODE_TO_CONTROL,
+    FAN_TARGET_RECONCILE_GRACE,
     WRITE_READBACK_DELAY,
 )
-from .fan_policy import effective_fan_target
+from .fan_policy import (
+    FAN_CONTROL_TO_MODE,
+    effective_fan_target,
+    reconcile_fixed_fan_target,
+)
 from .models import GreeUnit
 from .system_policy import DirectionState, allowed_mode_codes, system_direction
 
@@ -47,10 +53,13 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
         )
         self.entry = entry
         self.api = api
+        self._fan_target_hold_until: dict[str, float] = {}
 
     async def _async_update_data(self) -> dict[str, GreeUnit]:
         try:
-            return await self.api.async_get_units()
+            units = await self.api.async_get_units()
+            self._reconcile_fan_targets(units)
+            return units
         except GreeAuthError as err:
             raise ConfigEntryAuthFailed(
                 "Gree GMV cloud credential was rejected"
@@ -81,6 +90,31 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
             options={**self.entry.options, CONF_FAN_TARGETS: targets},
         )
 
+    def _reconcile_fan_targets(self, units: dict[str, GreeUnit]) -> None:
+        """Reflect wired-controller fixed-level changes in HA target state."""
+        configured = self.entry.options.get(CONF_FAN_TARGETS, {})
+        targets = dict(configured) if isinstance(configured, dict) else {}
+        now = time.monotonic()
+        changed = False
+        for unit_key, unit in units.items():
+            if now < self._fan_target_hold_until.get(unit_key, 0):
+                continue
+            current = effective_fan_target(targets.get(unit_key))
+            reconciled = reconcile_fixed_fan_target(
+                current,
+                reported_wind_speed=unit.reported_wind_speed,
+                power=unit.power,
+                mode=unit.mode,
+            )
+            if reconciled != current:
+                targets[unit_key] = reconciled
+                changed = True
+        if changed:
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                options={**self.entry.options, CONF_FAN_TARGETS: targets},
+            )
+
     async def async_control(
         self,
         unit_key: str,
@@ -97,10 +131,16 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
                 "using power, mode, or temperature controls."
             )
         try:
-            await self.api.async_control_unit(
+            requested_fan_code = FAN_MODE_TO_CONTROL[fan_mode]
+            reconcile_reported_fan = (
+                explicit_fan_mode is None
+                and time.monotonic() >= self._fan_target_hold_until.get(unit_key, 0)
+            )
+            applied_fan_code = await self.api.async_control_unit(
                 unit_key,
-                wind_target_code=FAN_MODE_TO_CONTROL[fan_mode],
+                wind_target_code=requested_fan_code,
                 changes=changes,
+                reconcile_reported_fan=reconcile_reported_fan,
             )
         except GreeControlError:
             # Never retry a write. A prompt poll is safe and helps resolve both
@@ -109,5 +149,10 @@ class GreeCoordinator(DataUpdateCoordinator[dict[str, GreeUnit]]):
             raise
         if explicit_fan_mode is not None:
             self.save_fan_target(unit_key, explicit_fan_mode)
+            self._fan_target_hold_until[unit_key] = (
+                time.monotonic() + FAN_TARGET_RECONCILE_GRACE
+            )
+        elif applied_fan_code != requested_fan_code:
+            self.save_fan_target(unit_key, FAN_CONTROL_TO_MODE[applied_fan_code])
         await asyncio.sleep(WRITE_READBACK_DELAY)
         await self.async_request_refresh()

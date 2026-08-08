@@ -10,8 +10,9 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
-from .const import DEFAULT_BASE_URL, TOKEN_REFRESH_MARGIN
+from .const import DEFAULT_BASE_URL, FAN_MODE_TO_CONTROL, TOKEN_REFRESH_MARGIN
 from .crypto import encrypt_control_payload
+from .fan_policy import FAN_CONTROL_TO_MODE, reconcile_fixed_fan_target
 from .models import GreeUnit
 from .system_policy import validate_control_change
 
@@ -242,7 +243,8 @@ class GreeCloudApi:
         *,
         wind_target_code: int,
         changes: dict[str, int | float],
-    ) -> None:
+        reconcile_reported_fan: bool = False,
+    ) -> int:
         """Read fresh state, merge explicit safe fan target, and write exactly once."""
         if wind_target_code not in (1, 2, 3, 4, 5, 6):
             raise ValueError("wind_target_code must be 1 through 6")
@@ -270,6 +272,16 @@ class GreeCloudApi:
                 raise GreeProtocolError(
                     "The indoor unit has no current set temperature"
                 )
+            resolved_wind_target_code = wind_target_code
+            if reconcile_reported_fan:
+                configured_target = FAN_CONTROL_TO_MODE[wind_target_code]
+                reconciled_target = reconcile_fixed_fan_target(
+                    configured_target,
+                    reported_wind_speed=unit.reported_wind_speed,
+                    power=unit.power,
+                    mode=unit.mode,
+                )
+                resolved_wind_target_code = FAN_MODE_TO_CONTROL[reconciled_target]
             payload: dict[str, Any] = {
                 "openId": self._open_id,
                 "mac": unit.mac,
@@ -277,7 +289,7 @@ class GreeCloudApi:
                 "setTemp": unit.set_temperature,
                 "on_OFF_Status": int(unit.power),
                 "mode": unit.mode,
-                "windSpeed": wind_target_code,
+                "windSpeed": resolved_wind_target_code,
                 "systemId": unit.system_id,
                 "bindType": "DTU",
                 "timestamp": int(time.time() * 1000),
@@ -292,3 +304,4 @@ class GreeCloudApi:
             )
             if response.get("success") is not True or response.get("code") != 0:
                 raise GreeControlError("Gree cloud rejected the control command")
+            return resolved_wind_target_code
